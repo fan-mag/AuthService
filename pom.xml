@@ -93,8 +93,9 @@
         <dependency>
             <groupId>org.openjfx</groupId>
             <artifactId>javafx-base</artifactId>
-            <version>14-ea+2</version>
+            <version>11.0.2</version>
         </dependency>
+
 
 
     </dependencies>
