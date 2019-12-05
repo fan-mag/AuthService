@@ -97,7 +97,7 @@ public class Application<KC, VC, KP, VP, KB, VB> {
                         KP key = pair.getKey();
                         VP value = pair.getValue();
                         final ProducerRecord<KP, VP> record = new ProducerRecord<>(topic, key, value);
-                        if (Math.round(Math.random() * 100) <= 3) {
+                        if (Math.round(Math.random() * 100) >= 3) {
                             RecordMetadata metadata = producer.send(record).get();
                             System.out.printf("Producer record:(Key:%s, Value:%s, Partition:%d, Offset:%d) %n",
                                     key, value, metadata.partition(), metadata.offset());
