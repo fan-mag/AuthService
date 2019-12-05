@@ -1,3 +1,4 @@
+import com.google.gson.GsonBuilder;
 import javafx.util.Pair;
 import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -9,6 +10,7 @@ import org.apache.kafka.clients.producer.RecordMetadata;
 
 import java.io.FileReader;
 import java.io.IOException;
+import java.sql.SQLException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -27,9 +29,11 @@ public class Application<KC, VC, KP, VP, KB, VB> {
         synchronized void putIntoBuffer(KC key, VC value) {
             /* INPUT MESSAGE ACTIONS START */
             KB keyBuffer = (KB) key;
-            VB valueBuffer = (VB) value;
+            String userJson = (String) value;
+            User user = new GsonBuilder().create().fromJson(userJson, User.class);
             /* INPUT MESSAGE ACTIONS END */
-            messages.add(new Pair<>(keyBuffer, valueBuffer));
+            messages.add(new Pair<>(keyBuffer, (VB) user));
+            System.out.println("PUT INTO BUFFER: " + user);
         }
 
         synchronized Pair<KP, VP> getFromBuffer() {
@@ -38,9 +42,14 @@ public class Application<KC, VC, KP, VP, KB, VB> {
             messages.remove(0);
             /* OUTPUT MESSAGE ACTIONS START */
             KP keyProd = (KP) key;
-            VP valueProd = (VP) value;
+            Integer privilege = -1;
+            try {
+                privilege = DatabaseHelper.getPrivilege((User) value);
+            } catch (SQLException | ClassNotFoundException e) {
+                e.printStackTrace();
+            }
             /* OUTPUT MESSAGE ACTIONS END */
-            return new Pair<>(keyProd, valueProd);
+            return new Pair<>(keyProd, (VP) privilege);
         }
     }
 
@@ -53,28 +62,18 @@ public class Application<KC, VC, KP, VP, KB, VB> {
 
         @Override
         public void run() {
-            final int giveUp = Integer.parseInt((String) getInputProperty("poll_retries"));
-            int noRecordsCount = 0;
             while (true) {
                 final ConsumerRecords<KC, VC> consumerRecords =
                         consumer.poll(Duration.ofMillis(Long.parseLong(getInputProperty("poll_interval").toString())));
-                if (consumerRecords.count() == 0 && noRecordsCount++ > giveUp)
-                    break;
-                else {
-                    if (!consumerRecords.isEmpty()) noRecordsCount = 0;
-                    consumerRecords.forEach(record ->
-                    {
-                        System.out.printf("Consumer Record:(Key:%s, Value:%s, Partition:%d, Offset:%d)%n",
-                                record.key(), record.value(),
-                                record.partition(), record.offset());
-                        buffer.putIntoBuffer(record.key(), record.value());
-                    });
-                    consumer.commitAsync();
-                }
+                consumerRecords.forEach(record ->
+                {
+                    System.out.printf("Consumer Record:(Key:%s, Value:%s, Partition:%d, Offset:%d)%n",
+                            record.key(), record.value(),
+                            record.partition(), record.offset());
+                    buffer.putIntoBuffer(record.key(), record.value());
+                });
+                consumer.commitAsync();
             }
-            consumer.close();
-            System.out.println("Consumer done");
-            stop = true;
         }
     }
 
@@ -89,7 +88,8 @@ public class Application<KC, VC, KP, VP, KB, VB> {
 
         @Override
         public void run() {
-            while (!stop) {
+
+            while (true) {
                 try {
                     Thread.sleep(1);
                     if (!buffer.messages().isEmpty()) {
@@ -97,26 +97,24 @@ public class Application<KC, VC, KP, VP, KB, VB> {
                         KP key = pair.getKey();
                         VP value = pair.getValue();
                         final ProducerRecord<KP, VP> record = new ProducerRecord<>(topic, key, value);
-                        RecordMetadata metadata = producer.send(record).get();
-                        System.out.printf("Producer record:(Key:%s, Value:%s, Partition:%d, Offset:%d) %n",
-                                key, value, metadata.partition(), metadata.offset());
-                        Thread.sleep(Long.parseLong(getOutputProperty("pull_interval").toString()) - 1);
-                        System.out.printf("Messages in the queue: %d%n", buffer.messages().size());
+                        if (Math.round(Math.random() * 100) <= 3) {
+                            RecordMetadata metadata = producer.send(record).get();
+                            System.out.printf("Producer record:(Key:%s, Value:%s, Partition:%d, Offset:%d) %n",
+                                    key, value, metadata.partition(), metadata.offset());
+                            Thread.sleep(Long.parseLong(getOutputProperty("pull_interval").toString()) - 1);
+                            System.out.printf("Messages in the queue: %d%n", buffer.messages().size());
+                        } else System.out.println("The message was lost");
                     }
                 } catch (InterruptedException | ExecutionException e) {
                     e.printStackTrace();
                 }
-
             }
-            producer.flush();
-            producer.close();
-            System.out.println("Producer done");
+
         }
     }
 
     private final Properties kafkaInputProps = new Properties();
     private final Properties kafkaOutputProps = new Properties();
-    private volatile boolean stop = false;
     private Buffer buffer = new Buffer();
 
     private Object getInputProperty(String key) {
@@ -146,8 +144,9 @@ public class Application<KC, VC, KP, VP, KB, VB> {
     }
 
     public static void main(String[] args) throws IOException {
-        Application<String, String, String, Integer, String, String> app = new Application<>();
+        Application<String, String, String, Integer, String, User> app = new Application<>();
         app.startConsumer("src/main/resources/kafka-input.properties");
         app.startProducer("src/main/resources/kafka-output.properties");
+
     }
 }
