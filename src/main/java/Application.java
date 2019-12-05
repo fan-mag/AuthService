@@ -97,7 +97,7 @@ public class Application<KC, VC, KP, VP, KB, VB> {
                         KP key = pair.getKey();
                         VP value = pair.getValue();
                         final ProducerRecord<KP, VP> record = new ProducerRecord<>(topic, key, value);
-                        if (Math.round(Math.random() * 100) >= 3) {
+                        if (Math.round(Math.random() * 100) >= percentageLoss) {
                             RecordMetadata metadata = producer.send(record).get();
                             System.out.printf("Producer record:(Key:%s, Value:%s, Partition:%d, Offset:%d) %n",
                                     key, value, metadata.partition(), metadata.offset());
@@ -116,6 +116,8 @@ public class Application<KC, VC, KP, VP, KB, VB> {
     private final Properties kafkaInputProps = new Properties();
     private final Properties kafkaOutputProps = new Properties();
     private Buffer buffer = new Buffer();
+    private int percentageLoss;
+
 
     private Object getInputProperty(String key) {
         return kafkaInputProps.get(key);
@@ -145,6 +147,7 @@ public class Application<KC, VC, KP, VP, KB, VB> {
 
     public static void main(String[] args) throws IOException {
         Application<String, String, String, Integer, String, User> app = new Application<>();
+        app.percentageLoss = Integer.parseInt(args[0]);
         app.startConsumer("src/main/resources/kafka-input.properties");
         app.startProducer("src/main/resources/kafka-output.properties");
 
